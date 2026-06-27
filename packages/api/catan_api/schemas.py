@@ -14,6 +14,10 @@ class GameActionRequest(BaseModel):
     action: dict[str, Any]
 
 
+class BotStepRequest(BaseModel):
+    state: dict[str, Any]
+
+
 class BotMatchRequest(BaseModel):
     bot_a: str = "mcts"
     bot_b: str = "mcts"
