@@ -17,10 +17,10 @@ class MCTSBot(Bot):
 
     def __init__(
         self,
-        iterations: int = 80,
-        rollout_depth: int = 45,
+        iterations: int = 18,
+        rollout_depth: int = 22,
         exploration: float = 1.35,
-        branch_limit: int = 18,
+        branch_limit: int = 10,
     ) -> None:
         self.iterations = iterations
         self.rollout_depth = rollout_depth
