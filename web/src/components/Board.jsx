@@ -48,6 +48,11 @@ function buildPorts(board, nodes) {
 export default function Board({
   state,
   highlight = { nodes: new Set(), cities: new Set(), edges: new Set(), hexes: new Set() },
+  pendingMark = null,
+  pendingPrompt = null,
+  onConfirm,
+  onCancel,
+  confirmDisabled = false,
   onNode,
   onEdge,
   onHex,
@@ -55,6 +60,18 @@ export default function Board({
   const board = state.board;
   const layout = useMemo(() => computeLayout(board), [board]);
   const ports = useMemo(() => buildPorts(board, layout.nodes), [board, layout]);
+
+  // Screen anchor (in SVG user coords) for the placement confirmation popup.
+  const anchor = useMemo(() => {
+    if (!pendingMark) return null;
+    if (pendingMark.kind === "node") return layout.nodes[pendingMark.id] ?? null;
+    if (pendingMark.kind === "hex") return layout.hexes.find((h) => h.id === pendingMark.id) ?? null;
+    if (pendingMark.kind === "edge") {
+      const e = layout.edges.find((e) => e.id === pendingMark.id);
+      return e ? { x: (e.x1 + e.x2) / 2, y: (e.y1 + e.y2) / 2 } : null;
+    }
+    return null;
+  }, [pendingMark, layout]);
 
   const nodeOwner = {};
   const nodeKind = {};
@@ -74,6 +91,7 @@ export default function Board({
   });
 
   return (
+    <div className="board-wrap">
     <svg
       className="board"
       viewBox={`0 0 ${layout.width} ${layout.height}`}
@@ -113,13 +131,14 @@ export default function Board({
         {layout.hexes.map((hex) => {
           const meta = HEX_META[hex.type] ?? HEX_META.DESERT;
           const clickable = highlight.hexes.has(hex.id);
+          const isPending = pendingMark?.kind === "hex" && pendingMark.id === hex.id;
           return (
             <polygon
               key={`hexfill-${hex.id}`}
               points={hexPoints(hex.x, hex.y, SIZE * 0.985)}
               fill={meta.color}
-              stroke={clickable ? "#f4ecd8" : "#00000022"}
-              strokeWidth={clickable ? 3.5 : 1}
+              stroke={isPending ? "#e3a72b" : clickable ? "#f4ecd8" : "#00000022"}
+              strokeWidth={isPending ? 5 : clickable ? 3.5 : 1}
               className={clickable ? "hex clickable" : "hex"}
               onClick={clickable ? () => onHex?.(hex.id) : undefined}
             />
@@ -161,6 +180,7 @@ export default function Board({
         const owner = edgeOwner[edge.id];
         const clickable = highlight.edges.has(edge.id);
         if (owner == null && !clickable) return null;
+        const isPending = pendingMark?.kind === "edge" && pendingMark.id === edge.id;
         return (
           <g key={`edge-${edge.id}`}>
             {owner != null && (
@@ -173,7 +193,13 @@ export default function Board({
               y2={edge.y2}
               stroke={owner != null ? PLAYER_COLORS[owner] : undefined}
               className={
-                owner != null ? "road" : clickable ? "road-target clickable" : "road"
+                owner != null
+                  ? "road"
+                  : isPending
+                  ? "road-target clickable pending"
+                  : clickable
+                  ? "road-target clickable"
+                  : "road"
               }
               onClick={clickable ? () => onEdge?.(edge.id) : undefined}
             />
@@ -188,13 +214,16 @@ export default function Board({
         const placeable = highlight.nodes.has(node.id);
         const upgradeable = highlight.cities.has(node.id);
         if (owner == null && !placeable) return null;
+        const isPending = pendingMark?.kind === "node" && pendingMark.id === node.id;
 
         if (owner != null) {
           const color = PLAYER_COLORS[owner];
+          const stroke = isPending ? "#e3a72b" : upgradeable ? "#f4ecd8" : "#fbf6ea";
+          const sw = isPending ? 4 : upgradeable ? 3 : 2.5;
           if (kind === "city") {
             return (
               <g key={`node-${node.id}`} className={upgradeable ? "piece clickable" : "piece"} onClick={upgradeable ? () => onNode?.(node.id) : undefined}>
-                <rect x={node.x - 12} y={node.y - 12} width={24} height={24} rx={5} fill={color} stroke={upgradeable ? "#f4ecd8" : "#fbf6ea"} strokeWidth={upgradeable ? 3 : 2.5} />
+                <rect x={node.x - 12} y={node.y - 12} width={24} height={24} rx={5} fill={color} stroke={stroke} strokeWidth={sw} />
                 <rect x={node.x - 5} y={node.y - 5} width={10} height={10} rx={2} fill="#ffffff55" />
               </g>
             );
@@ -206,8 +235,8 @@ export default function Board({
               cy={node.y}
               r={11}
               fill={color}
-              stroke={upgradeable ? "#f4ecd8" : "#fbf6ea"}
-              strokeWidth={upgradeable ? 3 : 2.5}
+              stroke={stroke}
+              strokeWidth={sw}
               className={upgradeable ? "piece clickable" : "piece"}
               onClick={upgradeable ? () => onNode?.(node.id) : undefined}
             />
@@ -219,12 +248,33 @@ export default function Board({
             key={`node-${node.id}`}
             cx={node.x}
             cy={node.y}
-            r={9}
-            className="node-target clickable"
+            r={isPending ? 11 : 9}
+            className={isPending ? "node-target clickable pending" : "node-target clickable"}
             onClick={() => onNode?.(node.id)}
           />
         );
       })}
     </svg>
+
+    {anchor && pendingPrompt && (
+      <div
+        className="place-confirm"
+        style={{
+          left: `${(anchor.x / layout.width) * 100}%`,
+          top: `${(anchor.y / layout.height) * 100}%`,
+        }}
+      >
+        <span className="confirm-text">{pendingPrompt}</span>
+        <div className="confirm-actions">
+          <button className="btn-primary" onClick={onConfirm} disabled={confirmDisabled}>
+            Confirm
+          </button>
+          <button className="btn-secondary" onClick={onCancel} disabled={confirmDisabled}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    )}
+    </div>
   );
 }

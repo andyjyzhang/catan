@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { actionLabel, HUMAN_ID, PHASE_LABEL } from "../format.js";
+import { actionLabel, BOT_ID, HUMAN_ID, PHASE_LABEL, PLAYER_NAMES } from "../format.js";
 import DiscardPanel from "./DiscardPanel.jsx";
 import Dice from "./Dice.jsx";
 
@@ -74,7 +74,6 @@ export default function ActionPanel({ state, legalActions, onAction, busy, winne
   if (winner != null) {
     return (
       <div className="panel action-panel">
-        <h2>Controls</h2>
         <p className="muted">The game is over. Start a new game to play again.</p>
       </div>
     );
@@ -83,10 +82,9 @@ export default function ActionPanel({ state, legalActions, onAction, busy, winne
   if (!isHumanTurn) {
     return (
       <div className="panel action-panel">
-        <h2>Controls</h2>
         <p className="thinking">
           <span className="thinking-dot" />
-          The bot is plotting its move
+          {PLAYER_NAMES[BOT_ID]} is plotting its move
         </p>
         {state.dice_roll != null && (
           <div className="dice-tray">
@@ -106,7 +104,6 @@ export default function ActionPanel({ state, legalActions, onAction, busy, winne
 
   return (
     <div className="panel action-panel">
-      <h2>Controls</h2>
       <p className="phase-label">{PHASE_LABEL[phase] ?? phase}</p>
       {state.dice_roll != null && (
         <div className="dice-tray">

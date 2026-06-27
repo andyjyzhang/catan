@@ -4,7 +4,7 @@
 export const HUMAN_ID = 0;
 export const BOT_ID = 1;
 
-export const PLAYER_NAMES = { 0: "You", 1: "Bot" };
+export const PLAYER_NAMES = { 0: "You", 1: "AlphaHex" };
 export const PLAYER_COLORS = { 0: "#c1432f", 1: "#2d5f86" };
 
 export const RESOURCE_META = {
@@ -92,31 +92,34 @@ export function actionLabel(action) {
   }
 }
 
-// Sentence describing an applied action, for the action log.
+// Sentence describing an applied action, for the action log. Returns null for
+// actions that shouldn't appear in the log (dice rolls, end of turn).
 export function logLine(action) {
   const who = PLAYER_NAMES[action.player_id] ?? `P${action.player_id}`;
   const p = action.payload ?? {};
   switch (action.action_type) {
     case "PLACE_SETTLEMENT":
     case "BUILD_SETTLEMENT":
-      return `${who} built a settlement (node ${p.node_id}).`;
+      return `${who} built a settlement.`;
     case "BUILD_CITY":
-      return `${who} upgraded to a city (node ${p.node_id}).`;
+      return `${who} upgraded to a city.`;
     case "PLACE_ROAD":
     case "BUILD_ROAD":
-      return `${who} built a road (edge ${p.edge_id}).`;
+      return `${who} built a road.`;
     case "ROLL_DICE":
-      return `${who} rolled the dice.`;
+      return null;
+    case "END_TURN":
+      return null;
     case "DISCARD":
       return `${who} discarded ${resourceSummary(p.resources ?? {})}.`;
     case "MOVE_ROBBER":
-      return `${who} moved the robber to hex ${p.hex_id}.`;
+      return `${who} moved the robber.`;
     case "STEAL_RESOURCE":
       return `${who} stole a card from ${PLAYER_NAMES[p.target_player] ?? `P${p.target_player}`}.`;
     case "BUY_DEV_CARD":
       return `${who} bought a development card.`;
     case "PLAY_KNIGHT":
-      return `${who} played a Knight and moved the robber to hex ${p.robber_hex_id}.`;
+      return `${who} played a Knight and moved the robber.`;
     case "PLAY_MONOPOLY":
       return `${who} played Monopoly on ${RESOURCE_META[p.resource]?.label ?? p.resource}.`;
     case "PLAY_YEAR_OF_PLENTY":
@@ -125,8 +128,6 @@ export function logLine(action) {
       return `${who} played Road Building.`;
     case "MARITIME_TRADE":
       return `${who} traded ${p.give_count} ${RESOURCE_META[p.give]?.label ?? p.give} for 1 ${RESOURCE_META[p.receive]?.label ?? p.receive}.`;
-    case "END_TURN":
-      return `${who} ended their turn.`;
     default:
       return `${who}: ${action.action_type}`;
   }

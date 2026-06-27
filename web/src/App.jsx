@@ -9,17 +9,30 @@ import { BOT_ID, HUMAN_ID, logLine, PLAYER_NAMES } from "./format.js";
 const BOT_MOVE_DELAY_MS = 450;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Placement actions ask for a confirmation before being applied.
+const PLACEMENT_PROMPT = {
+  PLACE_SETTLEMENT: "Place your settlement here?",
+  BUILD_SETTLEMENT: "Build a settlement here?",
+  BUILD_CITY: "Upgrade to a city here?",
+  PLACE_ROAD: "Place your road here?",
+  BUILD_ROAD: "Build a road here?",
+  MOVE_ROBBER: "Move the robber here?",
+};
+
 export default function App() {
   const [game, setGame] = useState(null); // { state, legal_actions, winner }
   const [log, setLog] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [pending, setPending] = useState(null); // placement action awaiting confirmation
 
   const startedRef = useRef(false);
   const botRunningRef = useRef(false);
 
   const appendLog = useCallback((action) => {
-    setLog((prev) => [...prev, { text: logLine(action), player: action.player_id }]);
+    const text = logLine(action);
+    if (text == null) return; // skipped actions (dice rolls, end turn)
+    setLog((prev) => [...prev, { text, player: action.player_id }]);
   }, []);
 
   // Drive the bot until it is the human's turn again (or the game ends).
@@ -50,6 +63,7 @@ export default function App() {
   const startNewGame = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setPending(null);
     try {
       const seed = Math.floor(Math.random() * 1_000_000);
       const resp = await api.newGame(seed);
@@ -140,14 +154,39 @@ export default function App() {
     };
   }, [game]);
 
-  const onNode = useCallback((id) => { const a = resolveNode(id); if (a) handleAction(a); }, [resolveNode, handleAction]);
-  const onEdge = useCallback((id) => { const a = resolveEdge(id); if (a) handleAction(a); }, [resolveEdge, handleAction]);
-  const onHex = useCallback((id) => { const a = resolveHex(id); if (a) handleAction(a); }, [resolveHex, handleAction]);
+  const onNode = useCallback((id) => { const a = resolveNode(id); if (a) setPending(a); }, [resolveNode]);
+  const onEdge = useCallback((id) => { const a = resolveEdge(id); if (a) setPending(a); }, [resolveEdge]);
+  const onHex = useCallback((id) => { const a = resolveHex(id); if (a) setPending(a); }, [resolveHex]);
+
+  const confirmPending = useCallback(() => {
+    if (!pending) return;
+    const action = pending;
+    setPending(null);
+    handleAction(action);
+  }, [pending, handleAction]);
+
+  // The board spot currently awaiting confirmation (for highlighting).
+  const pendingMark = useMemo(() => {
+    if (!pending) return null;
+    const p = pending.payload ?? {};
+    switch (pending.action_type) {
+      case "PLACE_SETTLEMENT":
+      case "BUILD_SETTLEMENT":
+      case "BUILD_CITY":
+        return { kind: "node", id: p.node_id };
+      case "PLACE_ROAD":
+      case "BUILD_ROAD":
+        return { kind: "edge", id: p.edge_id };
+      case "MOVE_ROBBER":
+        return { kind: "hex", id: p.hex_id };
+      default:
+        return null;
+    }
+  }, [pending]);
 
   if (!game) {
     return (
       <div className="app loading">
-        <h1>Catan — Play the Bot</h1>
         <p>{error ? `Error: ${error}` : "Loading…"}</p>
       </div>
     );
@@ -157,29 +196,33 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <h1>
-          Catan <span className="accent">— play the bot</span>
-        </h1>
-        <div className="header-right">
-          <span className="turn-indicator">
-            Turn {state.turn_number} · <strong>{PLAYER_NAMES[state.current_player]}</strong> to move
-          </span>
-          <button className="btn-secondary" onClick={startNewGame} disabled={busy}>
-            New game
-          </button>
-        </div>
-      </header>
+      <div className="sea-bg">
+        <Board
+          state={state}
+          highlight={highlight}
+          pendingMark={pendingMark}
+          pendingPrompt={
+            pending ? PLACEMENT_PROMPT[pending.action_type] ?? "Confirm this action?" : null
+          }
+          onConfirm={confirmPending}
+          onCancel={() => setPending(null)}
+          confirmDisabled={busy}
+          onNode={onNode}
+          onEdge={onEdge}
+          onHex={onHex}
+        />
+      </div>
 
-      {error && <div className="error-banner">{error}</div>}
-      {winner != null && (
-        <div className={`winner-banner ${winner === HUMAN_ID ? "win" : "lose"}`}>
-          {winner === HUMAN_ID ? "🎉 You won!" : "🤖 The bot won."} — start a new game to play again.
-        </div>
-      )}
-
-      <div className="layout">
+      <div className="hud">
         <aside className="left-col">
+          <div className="panel topbar">
+            <span className="turn-indicator">
+              <strong>{PLAYER_NAMES[state.current_player]}</strong> to move
+            </span>
+            <button className="btn-secondary" onClick={startNewGame} disabled={busy}>
+              New game
+            </button>
+          </div>
           <PlayerPanel state={state} playerId={HUMAN_ID} targetVp={state.config.target_vp} />
           <PlayerPanel state={state} playerId={BOT_ID} targetVp={state.config.target_vp} />
           <ActionPanel
@@ -191,14 +234,26 @@ export default function App() {
           />
         </aside>
 
-        <main className="board-col">
-          <Board state={state} highlight={highlight} onNode={onNode} onEdge={onEdge} onHex={onHex} />
-        </main>
-
         <aside className="right-col">
           <ActionLog entries={log} />
         </aside>
+
+        <div className="banners">
+          {error && <div className="error-banner">{error}</div>}
+          {winner != null && (
+            <div className={`winner-banner ${winner === HUMAN_ID ? "win" : "lose"}`}>
+              {winner === HUMAN_ID ? "🎉 You won!" : "🤖 The bot won."} — start a new game to play again.
+            </div>
+          )}
+        </div>
       </div>
+
+      <footer className="credits">
+        Licensed under MIT ·{" "}
+        <a href="https://github.com/andyjyzhang/catan" target="_blank" rel="noopener noreferrer">
+          GitHub
+        </a>
+      </footer>
     </div>
   );
 }
