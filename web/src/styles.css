@@ -1410,6 +1410,10 @@ button:disabled {
   color: #356530;
   font-weight: 600;
 }
+.log-entry.steal .log-text {
+  color: #8f3a22;
+  font-weight: 700;
+}
 .log-dot {
   width: 8px;
   height: 8px;

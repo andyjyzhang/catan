@@ -28,7 +28,9 @@ TRAINING_DIR = REPO_ROOT / "data" / "training"
 DEFAULT_DATASET_PATH = TRAINING_DIR / "selfplay.jsonl"
 DEFAULT_LEADERBOARD_PATH = TRAINING_DIR / "leaderboard.json"
 DEFAULT_HISTORY_DIR = TRAINING_DIR / "checkpoints"
-BOARD_RULE_VERSION = "no_adjacent_duplicate_or_red_numbers"
+DEFAULT_LOG_PATH = TRAINING_DIR / "logs" / "train.out.log"
+BOARD_RULE_VERSION = "random_start_balanced_board_random_ports_friendly_robber"
+_LOG_FILE_PATH: Path | None = None
 
 TRAINABLE_PHASES = {Phase.SETUP_SETTLEMENT, Phase.SETUP_ROAD, Phase.MOVE_ROBBER, Phase.MAIN}
 PROFILE_DEFAULTS = {
@@ -82,6 +84,29 @@ class GameExamples:
     crashes: int
 
 
+def _log_progress(enabled: bool, **payload: Any) -> None:
+    if not enabled:
+        return
+    payload = {"time": int(time.time()), **payload}
+    _emit_json(payload)
+
+
+def _configure_log_file(path: Path | None) -> None:
+    global _LOG_FILE_PATH
+    _LOG_FILE_PATH = path
+    if _LOG_FILE_PATH is not None:
+        _LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _emit_json(payload: dict[str, Any]) -> None:
+    payload = {"time": int(time.time()), **payload}
+    line = json.dumps(payload, sort_keys=True)
+    print(line, flush=True)
+    if _LOG_FILE_PATH is not None:
+        with _LOG_FILE_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+
 def train(
     *,
     games: int,
@@ -104,6 +129,8 @@ def train(
     history_opponent_rate: float,
     history_opponents: int,
     accept_vp_margin: float,
+    cycle: int | None = None,
+    progress: bool = False,
 ) -> dict[str, Any]:
     rng = random.Random(seed)
     incumbent = load_value_network(output) if resume else None
@@ -118,6 +145,15 @@ def train(
 
     for game_index in range(games):
         game_seed = seed + game_index
+        _log_progress(
+            progress,
+            cycle=cycle,
+            stage="selfplay",
+            status="started",
+            game=game_index + 1,
+            games=games,
+            seed=game_seed,
+        )
         result = collect_game_examples(
             seed=game_seed,
             network=base_network,
@@ -138,11 +174,36 @@ def train(
             wins["draw"] += 1
         if dataset_path is not None:
             _append_game_dataset(dataset_path, game_seed, result)
+        _log_progress(
+            progress,
+            cycle=cycle,
+            stage="selfplay",
+            status="finished",
+            game=game_index + 1,
+            games=games,
+            examples=len(result.examples),
+            winner=result.winner,
+            final_score=result.final_score,
+            turn_count=result.turn_count,
+            illegal_actions=result.illegal_actions,
+            crashes=result.crashes,
+        )
 
     buffer_examples = _load_replay_examples(dataset_path, rng, buffer_samples) if dataset_path is not None else []
     training_examples = latest_examples + buffer_examples
 
     candidate = ValueNetwork.from_dict(base_network.to_dict())
+    _log_progress(
+        progress,
+        cycle=cycle,
+        stage="sgd",
+        status="started",
+        latest_examples=len(latest_examples),
+        buffer_examples=len(buffer_examples),
+        total_examples=len(training_examples),
+        epochs=epochs,
+        learning_rate=learning_rate,
+    )
     training_stats = candidate.train(
         training_examples,
         epochs=epochs,
@@ -150,7 +211,9 @@ def train(
         l2=l2,
         rng=rng,
     )
+    _log_progress(progress, cycle=cycle, stage="sgd", status="finished", **training_stats)
 
+    _log_progress(progress, cycle=cycle, stage="evaluation", status="started", games=eval_games)
     evaluation = evaluate_candidate(
         candidate=candidate,
         current=incumbent,
@@ -161,6 +224,14 @@ def train(
         branch_limit=branch_limit,
         max_turns=max_turns,
     )
+    _log_progress(progress, cycle=cycle, stage="evaluation", status="finished", evaluation=evaluation)
+    _log_progress(
+        progress,
+        cycle=cycle,
+        stage="history_evaluation",
+        status="started",
+        opponents=len(history_networks[:3]),
+    )
     history_evaluations = _evaluate_history(
         candidate=candidate,
         history_networks=history_networks,
@@ -169,6 +240,13 @@ def train(
         rollout_depth=rollout_depth,
         branch_limit=branch_limit,
         max_turns=max_turns,
+    )
+    _log_progress(
+        progress,
+        cycle=cycle,
+        stage="history_evaluation",
+        status="finished",
+        evaluations=history_evaluations,
     )
     accepted = _should_accept_candidate(incumbent, evaluation, accept_vp_margin)
     network_to_save = candidate if accepted else base_network
@@ -216,6 +294,16 @@ def train(
             "policy_loss_after": metadata.get("policy_loss_after", 0.0),
         },
     )
+    _log_progress(
+        progress,
+        cycle=cycle,
+        stage="checkpoint",
+        status="saved",
+        accepted=accepted,
+        checkpoint=str(checkpoint),
+        history_checkpoint=str(history_checkpoint) if history_checkpoint else None,
+        wins_by_player=metadata["wins_by_player"],
+    )
     return {"checkpoint": str(checkpoint), "history_checkpoint": str(history_checkpoint) if history_checkpoint else None, **metadata}
 
 
@@ -248,19 +336,16 @@ def train_continuously(
     try:
         while True:
             cycle += 1
-            print(
-                json.dumps(
-                    {
-                        "cycle": cycle,
-                        "status": "started",
-                        "profile_games": games,
-                        "iterations": iterations,
-                        "rollout_depth": rollout_depth,
-                        "branch_limit": branch_limit,
-                        "eval_games": eval_games,
-                    }
-                ),
-                flush=True,
+            _emit_json(
+                {
+                    "cycle": cycle,
+                    "status": "started",
+                    "profile_games": games,
+                    "iterations": iterations,
+                    "rollout_depth": rollout_depth,
+                    "branch_limit": branch_limit,
+                    "eval_games": eval_games,
+                }
             )
             summary = train(
                 games=games,
@@ -283,33 +368,32 @@ def train_continuously(
                 history_opponent_rate=history_opponent_rate,
                 history_opponents=history_opponents,
                 accept_vp_margin=accept_vp_margin,
+                cycle=cycle,
+                progress=True,
             )
             examples_total += int(summary["latest_examples"])
-            print(
-                json.dumps(
-                    {
-                        "cycle": cycle,
-                        "accepted": summary["accepted"],
-                        "checkpoint": summary["checkpoint"],
-                        "history_checkpoint": summary["history_checkpoint"],
-                        "examples_total": examples_total,
-                        "latest_examples": summary["latest_examples"],
-                        "buffer_examples": summary["buffer_examples"],
-                        "loss_before": summary["loss_before"],
-                        "loss_after": summary["loss_after"],
-                        "policy_loss_after": summary.get("policy_loss_after"),
-                        "evaluation": summary["evaluation"],
-                        "wins_by_player": summary["wins_by_player"],
-                        "illegal_actions": summary["illegal_actions"],
-                        "crashes": summary["crashes"],
-                    }
-                ),
-                flush=True,
+            _emit_json(
+                {
+                    "cycle": cycle,
+                    "accepted": summary["accepted"],
+                    "checkpoint": summary["checkpoint"],
+                    "history_checkpoint": summary["history_checkpoint"],
+                    "examples_total": examples_total,
+                    "latest_examples": summary["latest_examples"],
+                    "buffer_examples": summary["buffer_examples"],
+                    "loss_before": summary["loss_before"],
+                    "loss_after": summary["loss_after"],
+                    "policy_loss_after": summary.get("policy_loss_after"),
+                    "evaluation": summary["evaluation"],
+                    "wins_by_player": summary["wins_by_player"],
+                    "illegal_actions": summary["illegal_actions"],
+                    "crashes": summary["crashes"],
+                }
             )
             if sleep_seconds > 0:
                 time.sleep(sleep_seconds)
     except KeyboardInterrupt:
-        print(json.dumps({"stopped": True, "cycles": cycle, "examples_total": examples_total}), flush=True)
+        _emit_json({"stopped": True, "cycles": cycle, "examples_total": examples_total})
 
 
 def collect_game_examples(
@@ -726,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-dataset", action="store_true", help="do not append or sample the self-play JSONL dataset")
     parser.add_argument("--history-dir", type=Path, default=DEFAULT_HISTORY_DIR)
     parser.add_argument("--leaderboard", type=Path, default=DEFAULT_LEADERBOARD_PATH)
+    parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_PATH, help="continuous-training JSON log path")
     parser.add_argument("--history-opponent-rate", type=float)
     parser.add_argument("--history-opponents", type=int)
     parser.add_argument("--accept-vp-margin", type=float, default=-0.25)
@@ -781,6 +866,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.continuous:
+        _configure_log_file(args.log_file)
         train_continuously(
             seed=args.seed,
             output=args.output,

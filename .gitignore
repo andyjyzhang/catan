@@ -2,6 +2,10 @@
 .env
 __pycache__/
 data/replays/
+data/training/*.jsonl
+data/training/leaderboard.json
+data/training/checkpoints/
+data/training/logs/
 .npm-cache/
 node_modules/
 *.egg-info/

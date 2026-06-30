@@ -1,6 +1,44 @@
 [
   {
     "accepted": true,
+    "checkpoint": "C:\\Users\\Andy Zhang\\Downloads\\catan\\data\\training\\checkpoints\\value_network_1782800429_5.json",
+    "evaluation": {
+      "average_turns": 0.0,
+      "average_vp_margin": 0.0,
+      "candidate_wins": 0,
+      "crashes": 0,
+      "current_wins": 0,
+      "draws": 0,
+      "games": 0,
+      "illegal_actions": 0
+    },
+    "examples": 226,
+    "loss_after": 0.499166,
+    "policy_loss_after": 1.216114,
+    "score": 0.0,
+    "time": 1782800429
+  },
+  {
+    "accepted": true,
+    "checkpoint": "C:\\Users\\Andy Zhang\\Downloads\\catan\\data\\training\\checkpoints\\value_network_1782799699_1000000.json",
+    "evaluation": {
+      "average_turns": 200.5,
+      "average_vp_margin": 6.5,
+      "candidate_wins": 2,
+      "crashes": 0,
+      "current_wins": 0,
+      "draws": 0,
+      "games": 2,
+      "illegal_actions": 0
+    },
+    "examples": 2104,
+    "loss_after": 0.232559,
+    "policy_loss_after": 1.371123,
+    "score": 1.4333,
+    "time": 1782799699
+  },
+  {
+    "accepted": true,
     "checkpoint": "C:\\Users\\Andy Zhang\\Downloads\\catan\\data\\training\\checkpoints\\value_network_1782799011_2.json",
     "evaluation": {
       "average_turns": 0.0,

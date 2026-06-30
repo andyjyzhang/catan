@@ -363,7 +363,7 @@ def create_standard_board(seed: int | None = None) -> Board:
         node_edges[edge.node_a].append(edge_id)
         node_edges[edge.node_b].append(edge_id)
 
-    ports = _assign_ports(edges, node_hexes, sorted_corners)
+    ports = _assign_ports(edges, node_hexes, sorted_corners, rng if seed is not None else None)
     nodes = {
         node_id: Node(
             id=node_id,
@@ -401,14 +401,24 @@ def _random_valid_hex_specs(
     rng: random.Random,
     max_attempts: int = 10_000,
 ) -> list[tuple[int, int, HexType, int | None]]:
+    best_specs: list[tuple[int, int, HexType, int | None]] | None = None
+    best_score = float("inf")
     for _attempt in range(max_attempts):
         resource_types = list(STANDARD_RESOURCE_TYPES)
         number_tokens = list(STANDARD_NUMBER_TOKENS)
         rng.shuffle(resource_types)
         rng.shuffle(number_tokens)
         hex_specs = _hex_specs_from_layout(coords, resource_types, number_tokens)
-        if not _numbers_have_invalid_adjacency(hex_specs):
+        if _numbers_have_invalid_adjacency(hex_specs):
+            continue
+        score = _layout_quality_score(hex_specs)
+        if score < best_score:
+            best_specs = hex_specs
+            best_score = score
+        if score <= 10.0:
             return hex_specs
+    if best_specs is not None:
+        return best_specs
     raise RuntimeError("failed to generate a valid randomized Catan board")
 
 
@@ -433,6 +443,44 @@ def _hex_distance(left_q: int, left_r: int, right_q: int, right_r: int) -> int:
     return max(abs(left_q - right_q), abs(left_r - right_r), abs(left_s - right_s))
 
 
+def _layout_quality_score(hex_specs: list[tuple[int, int, HexType, int | None]]) -> float:
+    token_weights = {2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 8: 5, 9: 4, 10: 3, 11: 2, 12: 1}
+    resource_pips = {resource: 0.0 for resource in Resource}
+    resource_counts = {resource: 0 for resource in Resource}
+    total_pips = 0.0
+    total_resource_hexes = 0
+    score = 0.0
+
+    for _q, _r, hex_type, number in hex_specs:
+        resource = HEX_TO_RESOURCE.get(hex_type)
+        if resource is None or number is None:
+            continue
+        pips = float(token_weights.get(number, 0))
+        resource_pips[resource] += pips
+        resource_counts[resource] += 1
+        total_pips += pips
+        total_resource_hexes += 1
+
+    for resource in Resource:
+        expected = total_pips * resource_counts[resource] / max(1, total_resource_hexes)
+        score += abs(resource_pips[resource] - expected)
+
+    for left_index, (left_q, left_r, left_type, left_number) in enumerate(hex_specs):
+        left_resource = HEX_TO_RESOURCE.get(left_type)
+        if left_resource is None:
+            continue
+        for right_q, right_r, right_type, right_number in hex_specs[left_index + 1 :]:
+            if _hex_distance(left_q, left_r, right_q, right_r) != 1:
+                continue
+            right_resource = HEX_TO_RESOURCE.get(right_type)
+            if right_resource != left_resource:
+                continue
+            score += 1.5
+            if token_weights.get(left_number or 0, 0) >= 4 and token_weights.get(right_number or 0, 0) >= 4:
+                score += 2.5
+    return score
+
+
 def _hex_center(q: int, r: int) -> tuple[float, float]:
     return (math.sqrt(3) * (q + r / 2), 1.5 * r)
 
@@ -441,6 +489,7 @@ def _assign_ports(
     edges: dict[int, Edge],
     node_hexes: dict[int, list[int]],
     sorted_corners: list[tuple[float, float]],
+    rng: random.Random | None = None,
 ) -> dict[int, Port]:
     boundary_edges = [
         edge_id
@@ -466,13 +515,17 @@ def _assign_ports(
         Port("resource", Resource.ORE, 2),
         Port("generic", None, 3),
     ]
+    if rng is not None:
+        specs = list(specs)
+        rng.shuffle(specs)
 
     ports: dict[int, Port] = {}
     used_nodes: set[int] = set()
     start_indexes = [int(index * len(boundary_edges) / len(specs)) for index in range(len(specs))]
+    rotation = rng.randrange(len(boundary_edges)) if rng is not None else 0
     for spec, start in zip(specs, start_indexes, strict=True):
-        for offset in range(len(boundary_edges)):
-            edge = edges[boundary_edges[(start + offset) % len(boundary_edges)]]
+        for probe in range(len(boundary_edges)):
+            edge = edges[boundary_edges[(start + rotation + probe) % len(boundary_edges)]]
             if edge.node_a not in used_nodes and edge.node_b not in used_nodes:
                 ports[edge.node_a] = spec
                 ports[edge.node_b] = spec

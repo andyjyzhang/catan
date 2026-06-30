@@ -53,7 +53,7 @@ def bot_step(request: BotStepRequest) -> dict:
     action = _BOT.choose_action(observation, legal_actions, rng)
     new_state = apply_action(state, action, rng)
     payload = _game_payload(new_state, player_id=new_state.current_player)
-    payload["action"] = action.to_dict()
+    payload["action"] = new_state.action_log[-1] if new_state.action_log else action.to_dict()
     return payload
 
 

@@ -42,9 +42,13 @@ export default function App() {
 
   const appendLog = useCallback((action, beforeState = null, afterState = null) => {
     const text = logLine(action);
+    const resourceLines = resourceGainLines(beforeState, afterState, action);
+    const exactSteal = resourceLines.some((entry) => entry.kind === "steal");
     const entries = [];
-    if (text != null) entries.push({ text, player: action.player_id, kind: "action" });
-    entries.push(...resourceGainLines(beforeState, afterState));
+    if (text != null && !(action.action_type === "STEAL_RESOURCE" && exactSteal)) {
+      entries.push({ text, player: action.player_id, kind: "action" });
+    }
+    entries.push(...resourceLines);
     if (entries.length === 0) return;
     setLog((prev) => [...prev, ...entries]);
   }, []);
@@ -105,13 +109,15 @@ export default function App() {
       const resp = await api.newGame(seed);
       setLog([]);
       setGame({ state: resp.state, legal_actions: resp.legal_actions, winner: resp.winner });
-      // Human (player 0) always starts setup, so no bot turn to drive yet.
+      if (resp.winner == null && resp.state.current_player !== HUMAN_ID) {
+        await driveBot(resp.state, resp.winner);
+      }
     } catch (err) {
       setError(String(err.message ?? err));
     } finally {
       setBusy(false);
     }
-  }, [resetTargeting]);
+  }, [driveBot, resetTargeting]);
 
   useEffect(() => {
     if (startedRef.current) return;

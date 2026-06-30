@@ -56,7 +56,10 @@ replays under `data/replays/`.
 Games are initialized with seeded randomized standard boards. A valid board has
 the standard 19-hex geometry, standard resource and number-token counts, one
 desert with the robber, no number on the desert, no adjacent 6/8 number tokens,
-and no adjacent matching number tokens.
+and no adjacent matching number tokens. Board generation also randomizes the
+starting player and port order/rotation, then keeps the best fair layout from
+random attempts by reducing same-resource clustering and resource production
+imbalance.
 
 ## Train MCTS-NN
 
@@ -85,6 +88,18 @@ Continuous offline neural training:
 
 ```powershell
 python -m catan_bots.train_mcts_nn --profile offline --continuous --seed 0
+```
+
+Continuous training writes JSON progress logs to:
+
+```text
+data/training/logs/train.out.log
+```
+
+Watch progress with:
+
+```powershell
+Get-Content data\training\logs\train.out.log -Tail 30 -Wait
 ```
 
 Start a fresh value/policy network:

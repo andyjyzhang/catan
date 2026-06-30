@@ -7,7 +7,7 @@ from catan_engine.board import hex_resource
 from catan_engine.dev_cards import DevCard
 from catan_engine.dice import roll_dice
 from catan_engine.resources import ALL_RESOURCES, HexType, Resource, normalize_resources
-from catan_engine.robber import eligible_steal_targets, robber_blocks_player
+from catan_engine.robber import can_place_robber_on_hex, eligible_steal_targets, robber_blocks_player
 from catan_engine.scoring import total_vp, update_awards, visible_vp
 from catan_engine.state import GameState, PlayerState
 
@@ -15,15 +15,15 @@ ROAD_COST = {Resource.LUMBER: 1, Resource.BRICK: 1}
 SETTLEMENT_COST = {Resource.LUMBER: 1, Resource.BRICK: 1, Resource.WOOL: 1, Resource.GRAIN: 1}
 CITY_COST = {Resource.GRAIN: 2, Resource.ORE: 3}
 DEV_CARD_COST = {Resource.WOOL: 1, Resource.GRAIN: 1, Resource.ORE: 1}
-SETUP_ORDER = [
-    (0, Phase.SETUP_SETTLEMENT),
-    (0, Phase.SETUP_ROAD),
-    (1, Phase.SETUP_SETTLEMENT),
-    (1, Phase.SETUP_ROAD),
-    (1, Phase.SETUP_SETTLEMENT),
-    (1, Phase.SETUP_ROAD),
-    (0, Phase.SETUP_SETTLEMENT),
-    (0, Phase.SETUP_ROAD),
+SETUP_PHASES = [
+    Phase.SETUP_SETTLEMENT,
+    Phase.SETUP_ROAD,
+    Phase.SETUP_SETTLEMENT,
+    Phase.SETUP_ROAD,
+    Phase.SETUP_SETTLEMENT,
+    Phase.SETUP_ROAD,
+    Phase.SETUP_SETTLEMENT,
+    Phase.SETUP_ROAD,
 ]
 
 
@@ -46,7 +46,7 @@ def get_legal_actions(state: GameState) -> list[Action]:
         return [
             Action(ActionType.MOVE_ROBBER, state.current_player, {"hex_id": hex_id})
             for hex_id in sorted(state.board.hexes)
-            if hex_id != state.board.robber_hex_id
+            if can_place_robber_on_hex(state, hex_id, state.current_player)
         ]
     if state.phase == Phase.STEAL:
         return [
@@ -254,7 +254,7 @@ def _dev_card_actions(state: GameState) -> list[Action]:
     actions: list[Action] = []
     if player.dev_cards[DevCard.KNIGHT] > 0:
         for hex_id in sorted(state.board.hexes):
-            if hex_id == state.board.robber_hex_id:
+            if not can_place_robber_on_hex(state, hex_id, state.current_player):
                 continue
             targets = eligible_steal_targets(state, hex_id, state.current_player)
             if targets:
@@ -326,11 +326,19 @@ def _apply_place_setup_road(state: GameState, action: Action) -> None:
 
 def _advance_setup(state: GameState) -> None:
     state.setup_step += 1
-    if state.setup_step >= len(SETUP_ORDER):
+    setup_order = _setup_order(state.config.starting_player)
+    if state.setup_step >= len(setup_order):
         state.current_player = state.config.starting_player
         state.phase = Phase.ROLL
         return
-    state.current_player, state.phase = SETUP_ORDER[state.setup_step]
+    state.current_player, state.phase = setup_order[state.setup_step]
+
+
+def _setup_order(starting_player: int) -> list[tuple[int, Phase]]:
+    first = int(starting_player)
+    second = 1 - first
+    players = [first, first, second, second, second, second, first, first]
+    return list(zip(players, SETUP_PHASES, strict=True))
 
 
 def _apply_roll_dice(state: GameState, action: Action, rng: random.Random) -> None:
@@ -373,7 +381,9 @@ def _apply_move_robber(state: GameState, action: Action) -> None:
 
 
 def _apply_steal(state: GameState, action: Action, rng: random.Random) -> None:
-    _steal_random_resource(state, action.player_id, int(action.payload["target_player"]), rng)
+    stolen = _steal_random_resource(state, action.player_id, int(action.payload["target_player"]), rng)
+    if stolen is not None:
+        action.payload["stolen_resource"] = stolen.name
     state.legal_steal_targets = []
     state.phase = Phase.MAIN
 
@@ -420,7 +430,9 @@ def _apply_play_knight(state: GameState, action: Action, rng: random.Random) -> 
     update_awards(state)
     target = action.payload.get("target_player")
     if target is not None:
-        _steal_random_resource(state, action.player_id, int(target), rng)
+        stolen = _steal_random_resource(state, action.player_id, int(target), rng)
+        if stolen is not None:
+            action.payload["stolen_resource"] = stolen.name
     state.phase = Phase.MAIN
 
 
@@ -528,14 +540,15 @@ def _discard_combinations(player: PlayerState, amount: int) -> list[dict[Resourc
     return combos
 
 
-def _steal_random_resource(state: GameState, thief_id: int, target_id: int, rng: random.Random) -> None:
+def _steal_random_resource(state: GameState, thief_id: int, target_id: int, rng: random.Random) -> Resource | None:
     target = state.players[target_id]
     pool = [resource for resource in ALL_RESOURCES for _ in range(target.resources[resource])]
     if not pool:
-        return
+        return None
     resource = rng.choice(pool)
     target.resources[resource] -= 1
     state.players[thief_id].resources[resource] += 1
+    return resource
 
 
 def _maybe_win(state: GameState, player_id: int) -> None:

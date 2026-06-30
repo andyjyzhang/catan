@@ -76,8 +76,10 @@ function resourceSummary(resources) {
   return parts.join(", ") || "nothing";
 }
 
-export function resourceGainLines(beforeState, afterState) {
+export function resourceGainLines(beforeState, afterState, action = null) {
   if (!beforeState || !afterState) return [];
+  const stealLine = resourceStealLine(beforeState, afterState, action);
+  if (stealLine) return [stealLine];
   const lines = [];
   for (const playerId of [0, 1]) {
     const before = beforeState.players?.[playerId]?.resources ?? {};
@@ -96,6 +98,31 @@ export function resourceGainLines(beforeState, afterState) {
     }
   }
   return lines;
+}
+
+function resourceStealLine(beforeState, afterState, action) {
+  if (!action || !["STEAL_RESOURCE", "PLAY_KNIGHT"].includes(action.action_type)) return null;
+  const targetId = action.payload?.target_player;
+  if (targetId == null) return null;
+  const thiefId = action.player_id;
+  const thiefBefore = beforeState.players?.[thiefId]?.resources ?? {};
+  const thiefAfter = afterState.players?.[thiefId]?.resources ?? {};
+  const targetBefore = beforeState.players?.[targetId]?.resources ?? {};
+  const targetAfter = afterState.players?.[targetId]?.resources ?? {};
+  let stolen = action.payload?.stolen_resource ?? null;
+  if (!stolen) {
+    stolen = RESOURCE_ORDER.find((res) => {
+      const thiefGain = (thiefAfter[res] ?? 0) - (thiefBefore[res] ?? 0);
+      const targetLoss = (targetBefore[res] ?? 0) - (targetAfter[res] ?? 0);
+      return thiefGain > 0 && targetLoss > 0;
+    });
+  }
+  if (!stolen) return null;
+  return {
+    player: thiefId,
+    text: `${PLAYER_NAMES[thiefId] ?? `P${thiefId}`} stole 1 ${RESOURCE_META[stolen]?.label ?? stolen} from ${PLAYER_NAMES[targetId] ?? `P${targetId}`}.`,
+    kind: "steal",
+  };
 }
 
 // Short label for a single action (used on buttons).
